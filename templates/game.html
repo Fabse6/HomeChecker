@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dart Match</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body { 
+            font-family: Inter, sans-serif; 
+            background: #090909; 
+            color: white; 
+            padding: 16px 12px 24px;
+            display: flex; 
+            justify-content: center; 
+            margin: 0;
+        }
+
+        .game-card { 
+            background: #111111; 
+            padding: 24px; 
+            border-radius: 22px; 
+            width: 100%; 
+            max-width: 640px; 
+            box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+        }
+
+        h2 {
+            margin: 0;
+            font-size: clamp(2rem, 5vw, 2.6rem);
+            text-align: center;
+        }
+
+        .game-card h3 {
+            margin-top: 12px;
+            margin-bottom: 22px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #00e676;
+            text-align: center;
+        }
+
+        .player-row { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            background: #1f1f1f; 
+            padding: 16px 18px; 
+            margin: 10px 0; 
+            border-radius: 16px; 
+            font-size: 1rem; 
+            gap: 12px;
+        }
+
+        .player-row span:last-child {
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+
+        .active-turn { 
+            border: 2px solid #00e676; 
+            background: #16321f; 
+        }
+
+        input[type="number"] { 
+            font-size: 1.3rem; 
+            width: 100%; 
+            padding: 16px; 
+            border-radius: 16px; 
+            border: none; 
+            background: #222; 
+            color: white; 
+            text-align: center;
+            min-width: 0;
+        }
+
+        .controls {
+            display: grid;
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .action-btn, .action-back-btn {
+            width: 100%;
+            font-size: 1.05rem;
+            padding: 16px 18px;
+            border-radius: 16px;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.15s ease, filter 0.15s ease;
+        }
+
+        .action-btn {
+            background: #00e676;
+            color: #070707;
+            font-weight: 700;
+        }
+
+        .action-back-btn {
+            background: #ff4d4d;
+            color: #070707;
+            font-weight: 700;
+        }
+
+        .action-btn:hover, .action-back-btn:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.02);
+        }
+
+        .winner-box { 
+            background: #ffd700; 
+            color: #070707; 
+            font-size: 1.2rem; 
+            padding: 18px 16px; 
+            border-radius: 18px; 
+            margin-bottom: 20px; 
+            font-weight: 800; 
+            text-align: center;
+        }
+
+        .sidebar { 
+            position: fixed; 
+            top: 0; 
+            right: -320px; 
+            width: 320px; 
+            height: 100%; 
+            background: #111111; 
+            box-shadow: -2px 0 20px rgba(0,0,0,0.45); 
+            transition: right 0.3s ease; 
+            padding: 24px; 
+            box-sizing: border-box;
+            z-index: 1000;
+        }
+
+        .sidebar.open { right: 0; }
+
+        .sidebarbutton { 
+            position: fixed; 
+            top: 16px; 
+            right: 16px; 
+            background: #00e676; 
+            color: #070707; 
+            border: none; 
+            padding: 12px 14px; 
+            border-radius: 16px; 
+            cursor: pointer; 
+            font-size: 20px;
+            z-index: 999;
+        }
+
+        .sidebarclosebutton {
+            position: absolute; 
+            top: 16px; 
+            right: 16px; 
+            width: 40px; 
+            height: 40px; 
+            background: #ff5252; 
+            color: white; 
+            border: none; 
+            border-radius: 12px; 
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .sidebar-nav-btn {
+            width: 100%;
+            padding: 14px 16px;
+            margin-top: 14px;
+            background: #1f1f1f;
+            color: white;
+            border: 1px solid #2d2d2d;
+            border-radius: 14px;
+            font-size: 0.98rem;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .sidebar-nav-btn:hover { background: #232323; }
+
+        @media (max-width: 620px) {
+            body {
+                padding: 12px 10px 20px;
+            }
+            .game-card {
+                padding: 20px;
+            }
+            .player-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+                font-size: 0.98rem;
+            }
+            .player-row span:last-child {
+                font-size: 1.15rem;
+            }
+            .controls {
+                margin-top: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Button -->
+    <button class="sidebarbutton" onclick="toggleSidebar()">☰</button>
+
+    <!-- Sidebar Menu -->
+    <div class="sidebar" id="sidebar">
+        <button class="sidebarclosebutton" onclick="toggleSidebar()">X</button>
+        <h3 style="margin-top: 50px;">Menü</h3>
+        <button onclick="window.location.href='/'" class="sidebar-nav-btn">🏠 Lobby / Home</button>
+        <button onclick="window.location.href='/dart'" class="sidebar-nav-btn">🎯 Spiel</button>
+        <button onclick="window.location.href='/windows'" class="sidebar-nav-btn">🪟 Fenster-Monitor</button>
+    </div>
+
+    <!-- Main Game View -->
+    <div class="game-card">
+        <div id="winnerBoard" class="winner-box" style="display: none;"></div>
+
+        <h2 style="text-align: center;">🎯 501 Dart Game</h2>
+        <h3 id="nextPlayerNotice" style="color: #00e676; text-align: center;">Am Zug: -</h3>
+
+        <!-- Anzeige der Spieler -->
+        <div id="playersList"></div>
+
+        <hr style="border-color: #444; margin: 25px 0;">
+
+        <!-- Eingabefeld für Punkte -->
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+            <input type="number" id="scoreInput" placeholder="Punkte (0-180)" min="0" max="180" step="1" inputmode="numeric" pattern="[0-9]*" autofocus>
+            <button class="action-btn" onclick="submitScore()">OK</button>
+            <button class="action-back-btn" onclick="goBack()">Zurück</button>
+        </div>
+    </div>
+
+<script>
+    const ws = new WebSocket(`ws://${window.location.host}/ws/game`);
+
+    function toggleSidebar() {
+        const sidebar = document.getElementById("sidebar");
+        sidebar.classList.toggle("open");
+    }
+
+    ws.onmessage = (event) => {
+        const state = JSON.parse(event.data);
+        renderGame(state);
+        if (state.winner) {
+            setTimeout(() => {
+                alert("Herzlichen Glückwunsch, " + state.winner + " hat gewonnen!");
+                window.location.href = "/dart";
+            }, 1000);
+        }
+    };
+
+    function renderGame(state) {
+        if (!state.active_players) return;
+
+        const list = document.getElementById("playersList");
+        list.innerHTML = "";
+
+        if (state.winner) {
+            const wb = document.getElementById("winnerBoard");
+            wb.style.display = "block";
+            wb.innerText = `🏆 ${state.winner} hat gewonnen!`;
+            document.getElementById("nextPlayerNotice").innerText = "Spiel Beendet";
+        } else {
+            document.getElementById("nextPlayerNotice").innerText = `Am Zug: ${state.next_player}`;
+        }
+
+        state.active_players.forEach(p => {
+            const isActive = p.name === state.next_player && !state.winner;
+            list.innerHTML += `
+                <div class="player-row ${isActive ? 'active-turn' : ''}">
+                    <span><strong>${p.name}</strong> (Legs: ${p.legs}) (average: ${p.average.toFixed(2)})</span>
+                    <span style="font-weight: bold; font-size: 28px;">${p.score}</span>
+                </div>
+            `;
+        });
+    }
+
+    function submitScore() {
+        const input = document.getElementById("scoreInput");
+        const val = Number(input.value);
+
+        if (!Number.isInteger(val) || val < 0 || val > 180) {
+            alert("Ungültige Punktzahl! Nur Zahlen zwischen 0 und 180.");
+            input.value = "";
+            input.focus();
+            return;
+        }
+
+        ws.send(JSON.stringify({ action: "throw", score: val }));
+        input.value = "";
+        input.focus();
+    }
+
+    function goBack() {
+        ws.send(JSON.stringify({ action: "back" }));
+    }
+
+    const scoreInput = document.getElementById("scoreInput");
+
+    scoreInput.addEventListener("input", () => {
+        const value = scoreInput.value;
+        if (value === "") return;
+
+        const numericValue = Number(value);
+        if (!Number.isInteger(numericValue)) {
+            scoreInput.value = value.replace(/[^0-9]/g, "");
+            return;
+        }
+
+        if (numericValue < 0) scoreInput.value = 0;
+        if (numericValue > 180) scoreInput.value = 180;
+    });
+
+    scoreInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") submitScore();
+    });
+</script>
+
+</body>
+</html>

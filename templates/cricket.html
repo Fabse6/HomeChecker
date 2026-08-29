@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cricket Dart</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Inter, sans-serif;
+            background: radial-gradient(circle at top, #101010 0%, #050505 80%);
+            color: #f5f5f5;
+            padding: 14px 12px 18px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 760px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .topbar h1 {
+            margin: 0;
+            font-size: clamp(1.6rem, 4vw, 2.4rem);
+        }
+        .topbar button {
+            background: #00e676;
+            color: #070707;
+            border: none;
+            border-radius: 14px;
+            padding: 12px 16px;
+            cursor: pointer;
+            font-weight: 700;
+            box-shadow: 0 16px 30px rgba(0, 230, 118, 0.12);
+        }
+        .status-card {
+            background: #141414;
+            border: 1px solid #222;
+            border-radius: 22px;
+            padding: 20px;
+            margin-bottom: 16px;
+            display: grid;
+            gap: 12px;
+        }
+        .status-card .player-name {
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+        .status-card .label {
+            color: #9aa3b1;
+            font-size: 0.9rem;
+        }
+        .players-grid {
+            display: grid;
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .player-box {
+            background: #111111;
+            border: 1px solid #1f1f1f;
+            border-radius: 18px;
+            padding: 18px;
+            display: grid;
+            gap: 10px;
+        }
+        .player-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .player-header strong {
+            font-size: 1rem;
+            display: block;
+        }
+        .player-header span {
+            font-size: 0.95rem;
+            color: #cdd2da;
+        }
+        .score-pill {
+            background: rgba(0, 230, 118, 0.12);
+            color: #c8ffc8;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-weight: 700;
+        }
+        .cricket-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            font-size: 0.92rem;
+        }
+        .cricket-row span {
+            display: block;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: #171717;
+            text-align: center;
+            color: #d1d1d1;
+        }
+        .target-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+        .target-card {
+            background: #101010;
+            border: 1px solid #212121;
+            border-radius: 18px;
+            padding: 16px;
+            display: grid;
+            gap: 10px;
+        }
+        .target-card h2 {
+            margin: 0;
+            font-size: 1.05rem;
+            text-align: center;
+        }
+        .table-card {
+            background: #141414;
+            border: 1px solid #222;
+            border-radius: 20px;
+            padding: 14px;
+            margin-bottom: 16px;
+            overflow-x: auto;
+        }
+        .players-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: auto;
+        }
+        .players-table th,
+        .players-table td {
+            padding: 8px 6px;
+            text-align: center;
+            font-size: 0.85rem;
+            border: 1px solid #1b1b1b;
+        }
+        .players-table th {
+            font-weight: 700;
+            color: #abb2bf;
+            background: #171717;
+        }
+        .players-table th .player-name {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+            display: block;
+            color: #f5f5f5;
+        }
+        .players-table th .player-points {
+            font-size: 0.82rem;
+            color: #8fbc8f;
+        }
+        .players-table td {
+            color: #dcdfe4;
+            background: #111111;
+        }
+        .players-table td.target-label {
+            font-weight: 700;
+            color: #cdd2da;
+            text-align: left;
+            padding-left: 12px;
+            background: #141414;
+        }
+        .players-table th.player-col,
+        .players-table td.player-col {
+            min-width: 80px;
+        }
+        .players-table th.player-col.active-player,
+        .players-table td.active-player {
+            background: rgba(0, 230, 118, 0.12);
+        }
+        .players-table tr.closed-row td {
+            background: #0f0f0f !important;
+        }
+        .players-table tr.active-player td {
+            background: rgba(0, 230, 118, 0.08);
+        }
+        .players-table td .marker {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            margin: 0 auto;
+            color: #f0f0f0;
+        }
+        .players-table td .marker.empty {
+            color: #525252;
+        }
+        .target-actions {
+            display: grid;
+            gap: 6px;
+        }
+        .target-actions button {
+            width: 100%;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            padding: 10px 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            color: white;
+            background: #1a1a1a;
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .target-actions button:hover {
+            transform: translateY(-1px);
+            border-color: #00e676;
+        }
+        .target-actions button.small {
+            padding: 8px 8px;
+            font-size: 0.82rem;
+        }
+        .shot-box {
+            background: #141414;
+            border: 1px solid #222;
+            border-radius: 18px;
+            padding: 14px;
+            margin-bottom: 16px;
+        }
+        .shot-title {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+        .shots {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .shot-pill {
+            min-width: 64px;
+            border-radius: 999px;
+            background: #0f0f0f;
+            border: 1px solid #222;
+            padding: 8px 10px;
+            text-align: center;
+            font-weight: 700;
+            color: #d9d9d9;
+            font-size: 0.85rem;
+        }
+        .controls {
+            display: grid;
+            gap: 10px;
+        }
+        .controls button {
+            width: 100%;
+            border: none;
+            border-radius: 16px;
+            padding: 14px 16px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .target-actions .primary {
+            background: #00e676;
+            color: #070707;
+        }
+        .target-actions .secondary {
+            background: #202020;
+        }
+        .shot-box {
+            background: #141414;
+            border: 1px solid #222;
+            border-radius: 18px;
+            padding: 16px;
+            margin-bottom: 18px;
+        }
+        .shot-title {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        .shots {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .shot-pill {
+            min-width: 96px;
+            border-radius: 999px;
+            background: #0f0f0f;
+            border: 1px solid #222;
+            padding: 12px 14px;
+            text-align: center;
+            font-weight: 700;
+            color: #d9d9d9;
+        }
+        .controls {
+            display: grid;
+            gap: 12px;
+        }
+        .controls button {
+            width: 100%;
+            border: none;
+            border-radius: 16px;
+            padding: 16px 18px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .controls .submit {
+            background: #00e676;
+            color: #070707;
+        }
+        .controls .undo {
+            background: #ff5c5c;
+            color: #070707;
+        }
+        .controls .clear {
+            background: #272727;
+            color: #f5f5f5;
+        }
+        .footer {
+            margin-top: 18px;
+            text-align: center;
+            color: #8c8c8c;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="topbar">
+            <div>
+                <h1>Cricket Dart</h1>
+                <div class="label">Wähle bis zu 3 Werte pro Runde</div>
+            </div>
+            <button onclick="window.location.href='/dart'">Zurück</button>
+        </div>
+
+        <div class="status-card" id="gameStatus">
+            <div class="player-name">Aktiver Spieler: <span id="activePlayer">–</span></div>
+            <div class="label" id="turnInfo">Spielmodus: Cricket</div>
+        </div>
+
+        <div class="table-card">
+            <div class="table-scroll">
+                <table class="players-table" id="playersTable">
+                    <thead>
+                        <tr>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="shot-box">
+            <div class="shot-title">
+                <span>Geplante Würfe</span>
+                <span id="shotCount">0 / 3</span>
+            </div>
+            <div class="shots" id="shots"></div>
+        </div>
+
+        <div class="target-grid">
+            <div class="target-card">
+                <h2>20</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('20', 1)">S20</button>
+                    <button class="small secondary" onclick="addShot('20', 2)">D20</button>
+                    <button class="small secondary" onclick="addShot('20', 3)">T20</button>
+                </div>
+            </div>
+            <div class="target-card">
+                <h2>19</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('19', 1)">S19</button>
+                    <button class="small secondary" onclick="addShot('19', 2)">D19</button>
+                    <button class="small secondary" onclick="addShot('19', 3)">T19</button>
+                </div>
+            </div>
+            <div class="target-card">
+                <h2>18</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('18', 1)">S18</button>
+                    <button class="small secondary" onclick="addShot('18', 2)">D18</button>
+                    <button class="small secondary" onclick="addShot('18', 3)">T18</button>
+                </div>
+            </div>
+            <div class="target-card">
+                <h2>17</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('17', 1)">S17</button>
+                    <button class="small secondary" onclick="addShot('17', 2)">D17</button>
+                    <button class="small secondary" onclick="addShot('17', 3)">T17</button>
+                </div>
+            </div>
+            <div class="target-card">
+                <h2>16</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('16', 1)">S16</button>
+                    <button class="small secondary" onclick="addShot('16', 2)">D16</button>
+                    <button class="small secondary" onclick="addShot('16', 3)">T16</button>
+                </div>
+            </div>
+            <div class="target-card">
+                <h2>15</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('15', 1)">S15</button>
+                    <button class="small secondary" onclick="addShot('15', 2)">D15</button>
+                    <button class="small secondary" onclick="addShot('15', 3)">T15</button>
+                </div>
+            </div>
+            <div class="target-card">
+                <h2>Bull</h2>
+                <div class="target-actions">
+                    <button class="small primary" onclick="addShot('bull', 1)">SB</button>
+                    <button class="small secondary" onclick="addShot('bull', 2)">DB</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="submit" id="submitButton" onclick="submitTurn()" disabled>Wurf abschließen</button>
+            <button class="clear" onclick="clearTurn()">Zurücksetzen</button>
+            <button class="undo" onclick="goBack()">Undo</button>
+        </div>
+
+        <div class="footer">Ein Tableauschritt pro Ziel, danach zählt der Mehrwert als Punkte.</div>
+    </div>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws/game`);
+        let pendingShots = [];
+
+        ws.onmessage = (event) => {
+            const state = JSON.parse(event.data);
+            renderGame(state);
+        };
+
+        function renderGame(state) {
+            const active = document.getElementById('activePlayer');
+            const playersTable = document.getElementById('playersTable');
+            const playersTableBody = playersTable.querySelector('tbody');
+            const playersTableHead = playersTable.querySelector('thead tr');
+            const turnInfo = document.getElementById('turnInfo');
+
+            if (!state.active_players) {
+                active.textContent = 'Keine aktiven Spieler';
+                playersTableHead.innerHTML = '<th></th>';
+                playersTableBody.innerHTML = '';
+                return;
+            }
+
+            active.textContent = state.next_player;
+            turnInfo.textContent = state.winner ? `Gewinner: ${state.winner}` : 'Spielmodus: Cricket';
+
+            const targets = ['20', '19', '18', '17', '16', '15', 'bull'];
+            const activeIndex = state.active_players.findIndex(p => p.name === state.next_player);
+
+            playersTableHead.innerHTML = `<th></th>` + state.active_players.map((player, index) => {
+                const activeClass = index === activeIndex ? ' active-player' : '';
+                return `<th class="player-col${activeClass}"><div class="player-name">${player.name}</div><div class="player-points">${player.points || 0}</div></th>`;
+            }).join('');
+
+            playersTableBody.innerHTML = targets.map(target => {
+                const rowClosed = state.active_players.every(player => player.cricket[target] >= 3);
+                const rowClass = rowClosed ? 'closed-row' : '';
+                return `<tr class="${rowClass}"><td class="target-label">${target}</td>` + state.active_players.map((player, index) => {
+                    const activeClass = index === activeIndex ? ' active-player' : '';
+                    return `<td class="${activeClass}">${renderMarker(player.cricket[target])}</td>`;
+                }).join('') + `</tr>`;
+            }).join('');
+
+            document.getElementById('submitButton').disabled = state.winner || pendingShots.length === 0;
+        }
+
+        function renderMarker(count) {
+            if (count >= 3) return '<span class="marker filled">o</span>';
+            if (count === 2) return '<span class="marker filled">X</span>';
+            if (count === 1) return '<span class="marker filled">/</span>';
+            return '<span class="marker empty"></span>';
+        }
+
+        function addShot(target, multiplier) {
+            if (pendingShots.length >= 3) return;
+            pendingShots.push({ target, multiplier });
+            renderShots();
+        }
+
+        function renderShots() {
+            const shotsContainer = document.getElementById('shots');
+            const shotCount = document.getElementById('shotCount');
+            shotsContainer.innerHTML = '';
+
+            for (let i = 0; i < 3; i++) {
+                const shot = pendingShots[i];
+                const text = shot ? `${shot.multiplier}× ${shot.target}` : 'leer';
+                const pill = document.createElement('div');
+                pill.className = 'shot-pill';
+                pill.textContent = text;
+                shotsContainer.appendChild(pill);
+            }
+
+            shotCount.textContent = `${pendingShots.length} / 3`;
+            document.getElementById('submitButton').disabled = pendingShots.length === 0;
+        }
+
+        let winnerTimeout = null;
+
+        function submitTurn() {
+            if (pendingShots.length === 0) return;
+            ws.send(JSON.stringify({ action: 'throw', shots: pendingShots }));
+            pendingShots = [];
+            renderShots();
+        }
+
+        function clearTurn() {
+            pendingShots = [];
+            renderShots();
+        }
+
+        function goBack() {
+            ws.send(JSON.stringify({ action: 'back' }));
+        }
+
+        function handleWin(state) {
+            if (state.winner) {
+                if (winnerTimeout) clearTimeout(winnerTimeout);
+                winnerTimeout = setTimeout(() => {
+                    window.location.href = '/dart';
+                }, 3000);
+            }
+        }
+
+        ws.addEventListener('message', (event) => {
+            const state = JSON.parse(event.data);
+            renderGame(state);
+            handleWin(state);
+        });
+
+        renderShots();
+    </script>
+</body>
+</html>

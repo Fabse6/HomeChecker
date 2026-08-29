@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dart Counter - Lobby</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body { 
+            font-family: Inter, sans-serif; 
+            background: #090909; 
+            color: white; 
+            margin: 0;
+            padding: 16px 12px 24px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        .card { 
+            background: #111111; 
+            padding: 24px; 
+            border-radius: 18px; 
+            width: 100%; 
+            max-width: 680px; 
+            box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: clamp(1.8rem, 4vw, 2.4rem);
+            border-bottom: 2px solid #272727;
+            padding-bottom: 12px;
+        }
+
+        .lobby-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 24px;
+        }
+
+        @media (min-width: 768px) {
+            .lobby-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .form-group { 
+            margin-bottom: 18px; 
+        }
+
+        label {
+            font-weight: 700;
+            display: block;
+            margin-bottom: 10px;
+            color: #d1d1d1;
+        }
+
+        input, select, button { 
+            width: 100%; 
+            padding: 14px 16px; 
+            border-radius: 14px; 
+            border: 1px solid #2f2f2f; 
+            font-size: 1rem; 
+        }
+
+        input, select { 
+            background: #1e1e1e; 
+            color: white; 
+        }
+
+        input::placeholder {
+            color: #7a7a7a;
+        }
+
+        input:focus, select:focus {
+            outline: 2px solid #00e676;
+            outline-offset: 2px;
+        }
+
+        .btn-primary { 
+            background: #00e676; 
+            color: #070707; 
+            font-weight: 700; 
+            cursor: pointer; 
+            border: none;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+
+        .btn-primary:hover {
+            background: #00c853;
+        }
+
+        .mode-container {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .mode-button {
+            flex: 1;
+            padding: 14px 16px;
+            border: 1px solid #2f2f2f;
+            border-radius: 14px;
+            background: #1e1e1e;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s ease, border-color 0.2s ease;
+        }
+
+        .mode-button.active {
+            background: #00e676;
+            color: #070707;
+            border-color: #00e676;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-row input {
+            flex: 1;
+        }
+
+        .input-row button {
+            flex-shrink: 0;
+            width: 120px;
+        }
+
+        .active-box { 
+            border: 2px dashed #333; 
+            min-height: 120px; 
+            padding: 16px; 
+            border-radius: 14px; 
+            display: flex; 
+            gap: 10px; 
+            flex-wrap: wrap; 
+            align-content: flex-start;
+            background: #141414;
+        }
+
+        .chip { 
+            background: #1f384d; 
+            padding: 10px 14px; 
+            border-radius: 999px; 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+            font-size: 0.95rem;
+        }
+
+        .chip button { 
+            background: #ff5252; 
+            color: white; 
+            border-radius: 50%; 
+            width: 28px; 
+            height: 28px; 
+            padding: 0; 
+            line-height: 28px; 
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .player-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 220px;
+            overflow-y: auto;
+            padding-right: 6px;
+        }
+
+        .player-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: #1a1a1a;
+            border: 1px solid #2d2d2d;
+            border-radius: 12px;
+            padding: 10px 12px;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+
+        .player-row:hover {
+            border-color: #00e676;
+            background: #1f1f1f;
+        }
+
+        .player-row.selected {
+            border-color: #00e676;
+            background: rgba(0, 230, 118, 0.08);
+        }
+
+        .player-row .player-name {
+            font-weight: 600;
+            color: #f2f2f2;
+        }
+
+        .player-row .actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .player-row .select-btn,
+        .player-row .delete-btn {
+            width: auto;
+            min-width: 45px;
+            padding: 8px 10px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        .player-row .select-btn {
+            background: #00e676;
+            color: #070707;
+        }
+
+        .player-row .delete-btn {
+            background: #ff5252;
+            color: white;
+        }
+
+        .start-btn-container {
+            margin-top: 18px;
+            grid-column: 1 / -1;
+        }
+
+        .sidebar { 
+            position: fixed; 
+            top: 0; 
+            right: -320px; 
+            width: 320px; 
+            height: 100%; 
+            background: #111111; 
+            box-shadow: -2px 0 20px rgba(0,0,0,0.45); 
+            transition: right 0.3s ease; 
+            padding: 24px; 
+            overflow-y: auto; 
+            z-index: 1000;
+        }
+
+        .sidebar.open { 
+            right: 0; 
+        }
+
+        .sidebarbutton { 
+            position: fixed; 
+            top: 16px; 
+            right: 16px; 
+            width: 44px; 
+            height: 44px; 
+            background: #00e676; 
+            color: #070707; 
+            border: none; 
+            border-radius: 14px; 
+            cursor: pointer; 
+            font-size: 20px;
+            z-index: 999;
+        }
+
+        .sidebarclosebutton {
+            position: absolute; 
+            top: 16px; 
+            right: 16px; 
+            width: 40px; 
+            height: 40px; 
+            background: #ff5252; 
+            color: white; 
+            border: none; 
+            border-radius: 12px; 
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .sidebar .button {
+            width: 100%;
+            margin-top: 14px;
+            background: #1f1f1f;
+            color: white;
+            border: 1px solid #2b2b2b;
+            border-radius: 12px;
+            padding: 14px 16px;
+            text-align: left;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+
+        .sidebar .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 520px) {
+            body {
+                padding: 12px 10px 20px;
+            }
+            .card {
+                padding: 20px;
+            }
+            .input-row {
+                flex-direction: column;
+            }
+            .input-row button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <button class="sidebarbutton" onclick="toggleSidebar()">☰</button>
+
+    <div class="sidebar" id="sidebar">
+        <button class="sidebarclosebutton" onclick="toggleSidebar()">X</button>
+        <h3 style="margin-top: 40px;">Menü</h3>
+        <button onclick="openHome()" class="button">🏠 Home</button>
+        <button onclick="openGame()" class="button" disabled>🎯 Spiel</button>
+        <button onclick="openWindows()" class="button">🪟 Fenster-Monitor</button>
+    </div>
+
+    <div class="card">
+        <h2>🎯 Dart Lobby</h2>
+        
+        <div class="lobby-grid">
+            <!-- Linke Spalte: Spieler-Verwaltung -->
+            <div class="grid-col">
+                <!-- Neuer Spieler erstellen -->
+                <div class="form-group">
+                    <label for="newPlayerName">Neuen Spieler registrieren:</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="newPlayerName" placeholder="Name eingeben...">
+                        <button style="width: 35%;" class="btn-primary" onclick="createPlayer()">+ Anlegen</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Spieler auswählen:</label>
+                    <div id="playerList" class="player-list"></div>
+                </div>
+            </div>
+
+            <!-- Rechte Spalte: Match-Einstellungen -->
+            <div class="grid-col">
+                <!-- Aktive Liste -->
+                <div class="form-group">
+                    <label>Ausgewählte Spieler:</label>
+                    <div id="activeBox" class="active-box"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Spielmodus:</label>
+                    <div class="mode-container">
+                        <button id="mode501" class="mode-button active" onclick="selectMode('501')">501</button>
+                        <button id="modeCricket" class="mode-button" onclick="selectMode('cricket')">Cricket</button>
+                    </div>
+                </div>
+
+                <div class="form-group" id="legsContainer">
+                    <label for="legsToWin">Legs zum Sieg:</label>
+                    <input type="number" id="legsToWin" value="1" min="1">
+                </div>
+            </div>
+
+            <!-- Start-Button unten über die gesamte Breite -->
+            <div class="start-btn-container">
+                <button class="btn-primary" style="padding: 15px; font-size: 18px;" onclick="startGame()">Spiel Starten 🚀</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const ws = new WebSocket(`ws://${window.location.host}/ws`);
+    let selectedPlayers = [];
+    let selectedMode = '501';
+    let allPlayers = {{ players|tojson }};
+
+    function renderPlayerList(players) {
+        const list = document.getElementById('playerList');
+        list.innerHTML = '';
+
+        if (!players || players.length === 0) {
+            list.innerHTML = '<div style="padding: 10px; color: #9f9f9f;">Keine Spieler vorhanden.</div>';
+            return;
+        }
+
+        players.forEach(player => {
+            const row = document.createElement('div');
+            row.className = 'player-row' + (selectedPlayers.includes(player[1]) ? ' selected' : '');
+
+            const name = document.createElement('span');
+            name.className = 'player-name';
+            name.textContent = `${player[1]} (${player[2]})`;
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+
+            const selectBtn = document.createElement('button');
+            selectBtn.className = 'select-btn';
+            selectBtn.type = 'button';
+            selectBtn.textContent = selectedPlayers.includes(player[1]) ? '✓ Ausgewählt' : 'Add';
+            selectBtn.onclick = (event) => {
+                event.stopPropagation();
+                if (selectedPlayers.includes(player[1])) {
+                    removePlayer(player[1]);
+                    return;
+                }
+                addPlayerName(player[1]);
+            };
+
+            const isBot = player[1] === 'Bot';
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-btn';
+            deleteBtn.type = 'button';
+            deleteBtn.textContent = isBot ? '—' : 'X';
+            deleteBtn.disabled = isBot;
+            deleteBtn.title = isBot ? 'Der Bot kann nicht gelöscht werden.' : 'Spieler löschen';
+            if (!isBot) {
+                deleteBtn.onclick = async (event) => {
+                    event.stopPropagation();
+                    const confirmed = window.confirm(`"${player[1]}" wirklich komplett aus der Datenbank löschen?`);
+                    if (!confirmed) return;
+
+                    const res = await fetch('/api/players/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: player[1] })
+                    });
+
+                    if (!res.ok) {
+                        alert('Der Spieler konnte nicht gelöscht werden.');
+                        return;
+                    }
+
+                    const data = await res.json();
+                    allPlayers = data.players;
+                    selectedPlayers = selectedPlayers.filter(p => p !== player[1]);
+                    renderChips();
+                    renderPlayerList(allPlayers);
+                };
+            }
+
+            row.onclick = () => {
+                if (selectedPlayers.includes(player[1])) {
+                    removePlayer(player[1]);
+                } else {
+                    addPlayerName(player[1]);
+                }
+            };
+
+            actions.appendChild(selectBtn);
+            actions.appendChild(deleteBtn);
+            row.appendChild(name);
+            row.appendChild(actions);
+            list.appendChild(row);
+        });
+    }
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "player_added") {
+            allPlayers = data.players;
+            renderPlayerList(allPlayers);
+        }
+    };
+
+    function selectMode(mode) {
+        if (selectedMode === mode) return;
+        selectedMode = mode;
+        document.getElementById('mode501').classList.toggle('active', mode === '501');
+        document.getElementById('modeCricket').classList.toggle('active', mode === 'cricket');
+        document.getElementById('legsContainer').style.display = mode === '501' ? 'block' : 'none';
+    }
+
+    function toggleSidebar() {
+        const sidebar = document.getElementById("sidebar");
+        sidebar.classList.toggle("open");
+    }
+
+    function createPlayer() {
+        const nameInput = document.getElementById("newPlayerName");
+        if (!nameInput.value.trim()) return;
+        ws.send(JSON.stringify({ action: "add_player", name: nameInput.value.trim() }));
+        nameInput.value = "";
+    }
+
+    renderPlayerList(allPlayers);
+
+    function addPlayerName(name) {
+        if (!name || selectedPlayers.includes(name)) return;
+
+        selectedPlayers.push(name);
+        renderChips();
+        renderPlayerList(allPlayers);
+    }
+
+    function removePlayer(name) {
+        selectedPlayers = selectedPlayers.filter(p => p !== name);
+        renderChips();
+        renderPlayerList(allPlayers);
+    }
+
+    function renderChips() {
+        const box = document.getElementById("activeBox");
+        box.innerHTML = "";
+        selectedPlayers.forEach(p => {
+            box.innerHTML += `<div class="chip"><span>${p}</span><button onclick="removePlayer('${p}')">×</button></div>`;
+        });
+    }
+
+    async function startGame() {
+        if (selectedPlayers.length === 0) return alert("Bitte mindestens 1 Spieler auswählen!");
+        const legs = document.getElementById("legsToWin").value;
+        
+        const res = await fetch("/api/start-game", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ players: selectedPlayers, legs_to_win: legs, mode: selectedMode })
+        });
+
+        if (res.ok) {
+            if (selectedMode === 'cricket') {
+                window.location.href = "/dart/cricket";
+            } else {
+                window.location.href = "/dart/game";
+            }
+        }
+    }
+
+    function openHome() {
+        window.location.href = "/";
+    }
+
+    function openGame() {
+        window.location.href = "/dart";
+    }
+
+    function openWindows() {
+        window.location.href = "/windows";
+    }
+</script>
+
+</body>
+</html>
