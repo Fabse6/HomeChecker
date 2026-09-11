@@ -2,12 +2,23 @@ import os
 import time
 import asyncio
 import re
+import shutil
 import sqlite3
+import mimetypes
+import subprocess
 from pathlib import Path
+from urllib.parse import quote
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, UploadFile, File, BackgroundTasks, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from PIL import Image, UnidentifiedImageError
+
+try:
+    import pillow_heif
+except ImportError:  # pragma: no cover
+    pillow_heif = None
 
 from dartlogic import dartgame
 from sensors import get_window_states
@@ -19,11 +30,282 @@ game = dartgame()
 
 # Ordner für temporäre Dateien erstellen
 UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+FILES_DIR = Path("files")
+THUMBNAILS_DIR = Path("thumbnails")
+UPLOAD_DIR = Path(UPLOAD_DIR)
+FILES_DIR.mkdir(parents=True, exist_ok=True)
+THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 CLOUD_DB = Path("cloud.db")
 
 # Speicher für Datei-Metadaten
 uploaded_files = {}
+
+IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"}
+PDF_EXTENSIONS = {"pdf"}
+TEXT_EXTENSIONS = {"txt", "md", "json", "csv", "log", "yaml", "yml", "xml", "ini", "cfg", "toml", "sql"}
+CODE_EXTENSIONS = {"py", "js", "ts", "tsx", "jsx", "java", "c", "cc", "cpp", "h", "hpp", "cs", "go", "rs", "php", "swift", "kt", "rb", "sh", "bash", "html", "css", "scss", "vue", "tsx", "jsx"}
+AUDIO_EXTENSIONS = {"mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"}
+VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm", "m4v"}
+OFFICE_EXTENSIONS = {"docx", "odt", "doc", "xls", "xlsx", "ppt", "pptx"}
+
+BADGE_MAP = {
+    "pdf": "PDF",
+    "txt": "TXT",
+    "md": "MD",
+    "json": "JSON",
+    "csv": "CSV",
+    "py": "PY",
+    "js": "JS",
+    "ts": "TS",
+    "tsx": "TSX",
+    "jsx": "JSX",
+    "html": "HTML",
+    "css": "CSS",
+    "mp3": "MP3",
+    "wav": "WAV",
+    "ogg": "OGG",
+    "m4a": "M4A",
+    "aac": "AAC",
+    "flac": "FLAC",
+    "mp4": "MP4",
+    "mov": "MOV",
+    "avi": "AVI",
+    "mkv": "MKV",
+    "webm": "WEBM",
+    "jpg": "JPG",
+    "jpeg": "JPG",
+    "png": "PNG",
+    "gif": "GIF",
+    "webp": "WEBP",
+    "heic": "HEIC",
+    "heif": "HEIF",
+    "docx": "DOCX",
+    "odt": "ODT",
+    "doc": "DOC",
+    "xls": "XLS",
+    "xlsx": "XLSX",
+    "ppt": "PPT",
+    "pptx": "PPTX",
+}
+
+
+def sanitize_filename(name: str) -> str:
+    """Protects a user-supplied file name against unsafe path segments."""
+    cleaned = Path((name or "unnamed").replace("\\", "/")).name
+    cleaned = re.sub(r"[^A-Za-z0-9ÄÖÜäöüß._ ()-]", "_", cleaned).strip(" .")
+    return cleaned or "unnamed"
+
+
+def extension_for(filename: str) -> str:
+    return Path(filename).suffix.lower().lstrip(".")
+
+
+def categorize_file(filename: str) -> str:
+    ext = extension_for(filename)
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    if ext in PDF_EXTENSIONS:
+        return "pdf"
+    if ext in TEXT_EXTENSIONS:
+        return "text"
+    if ext in CODE_EXTENSIONS:
+        return "code"
+    if ext in AUDIO_EXTENSIONS:
+        return "audio"
+    if ext in VIDEO_EXTENSIONS:
+        return "video"
+    if ext in OFFICE_EXTENSIONS:
+        return "office"
+    return "other"
+
+
+def preview_kind_for_file(filename: str) -> str:
+    category = categorize_file(filename)
+    if category == "image":
+        return "image"
+    if category in {"pdf", "office"}:
+        return "pdf"
+    if category in {"text", "code"}:
+        return "text"
+    if category == "audio":
+        return "audio"
+    if category == "video":
+        return "video"
+    return "download"
+
+
+def badge_for_extension(filename: str) -> str:
+    ext = extension_for(filename)
+    return BADGE_MAP.get(ext, ext.upper()[:4] if ext else "FILE")
+
+
+def file_mime_type(filename: str) -> str:
+    guessed, _ = mimetypes.guess_type(filename)
+    if guessed:
+        return guessed
+    category = categorize_file(filename)
+    if category == "image":
+        return "image/jpeg"
+    if category == "pdf":
+        return "application/pdf"
+    if category == "audio":
+        return "audio/mpeg"
+    if category == "video":
+        return "video/mp4"
+    if category in {"text", "code"}:
+        return "text/plain; charset=utf-8"
+    return "application/octet-stream"
+
+
+def thumbnail_path_for(filename: str) -> Path:
+    raw_name = sanitize_filename(filename)
+    stem = Path(raw_name).stem
+    return THUMBNAILS_DIR / f"{stem}.jpg"
+
+
+def generate_thumbnail_for_image(source_path: Path, target_path: Path) -> bool:
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if pillow_heif is not None and source_path.suffix.lower() in {".heic", ".heif"}:
+            pillow_heif.register_heif_opener()
+        with Image.open(source_path) as image:
+            image = image.convert("RGB")
+            image.thumbnail((300, 300))
+            image.save(target_path, format="JPEG", quality=82, optimize=True)
+        return True
+    except (UnidentifiedImageError, OSError, ValueError):
+        return False
+
+
+def convert_office_to_pdf(source_path: Path, output_dir: Path) -> bool:
+    if source_path.suffix.lower() not in {".docx", ".odt", ".doc"}:
+        return False
+    if not shutil.which("soffice"):
+        return False
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run([
+        "soffice",
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(output_dir),
+        str(source_path),
+    ], capture_output=True, text=True)
+    if result.returncode != 0:
+        return False
+    pdf_name = source_path.with_suffix(".pdf").name
+    converted_path = output_dir / pdf_name
+    if converted_path.exists():
+        return True
+    return False
+
+
+def get_file_entry(path: Path) -> dict:
+    stat = path.stat()
+    filename = path.name
+    category = categorize_file(filename)
+    badge = badge_for_extension(filename)
+    has_thumbnail = False
+    thumbnail_url = None
+    if category == "image":
+        thumb_path = thumbnail_path_for(filename)
+        if thumb_path.exists():
+            has_thumbnail = True
+            thumbnail_url = f"/thumbnail/{quote(filename)}"
+    elif category == "office":
+        thumb_path = thumbnail_path_for(filename)
+        if thumb_path.exists():
+            has_thumbnail = True
+            thumbnail_url = f"/thumbnail/{quote(filename)}"
+    return {
+        "name": filename,
+        "size": stat.st_size,
+        "modified_at": stat.st_mtime,
+        "category": category,
+        "badge": badge,
+        "mime_type": file_mime_type(filename),
+        "has_thumbnail": has_thumbnail,
+        "thumbnail_url": thumbnail_url,
+        "can_preview_as_pdf": category in {"pdf", "office"},
+        "can_preview_as_text": category in {"text", "code"},
+        "can_play_audio": category == "audio",
+        "can_play_video": category == "video",
+        "can_view_image": category == "image",
+        "is_supported": category in {"image", "pdf", "text", "code", "audio", "video", "office"},
+    }
+
+
+def list_files_response() -> dict:
+    items = []
+    for file_path in sorted(FILES_DIR.iterdir(), key=lambda item: item.name.lower()):
+        if file_path.is_file():
+            items.append(get_file_entry(file_path))
+    return {"files": items, "count": len(items), "directory": str(FILES_DIR)}
+
+
+async def generate_thumbnail_for_uploaded_file(source_path: Path) -> None:
+    category = categorize_file(source_path.name)
+    if category != "image":
+        return
+    thumbnail_target = thumbnail_path_for(source_path.name)
+    if thumbnail_target.exists():
+        thumbnail_target.unlink()
+    generate_thumbnail_for_image(source_path, thumbnail_target)
+
+
+def resolve_storage_path(filename: str) -> Path:
+    safe_name = sanitize_filename(filename)
+    return FILES_DIR / safe_name
+
+
+def read_text_file(file_path: Path) -> str:
+    for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+        try:
+            return file_path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return file_path.read_text(encoding="utf-8", errors="replace")
+
+
+async def stream_file_range(request: Request, file_path: Path, media_type: str):
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+    if not range_header or not range_header.startswith("bytes="):
+        return StreamingResponse(file_path.open("rb"), media_type=media_type, headers={"Accept-Ranges": "bytes"})
+
+    try:
+        range_value = range_header.split("=", 1)[1]
+        start_str, end_str = range_value.split("-", 1)
+        start = int(start_str) if start_str else 0
+        end = int(end_str) if end_str else file_size - 1
+        if start >= file_size:
+            raise HTTPException(status_code=416, detail="Range not satisfiable")
+        end = min(end, file_size - 1)
+        length = end - start + 1
+        def content_iterator():
+            with file_path.open("rb") as target:
+                target.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = target.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+        return StreamingResponse(
+            content_iterator(),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Content-Length": str(length),
+            },
+        )
+    except ValueError:
+        return StreamingResponse(file_path.open("rb"), media_type=media_type, headers={"Accept-Ranges": "bytes"})
 
 class StartGameData(BaseModel):
     players: list[str]
@@ -121,46 +403,90 @@ async def get_cricket_page(request: Request):
 async def get_windows_page(request: Request):
     return templates.TemplateResponse("windows.html", {"request": request})
 
-@app.get("/files", response_class=HTMLResponse)
-async def get_files_page(request: Request):
-    return templates.TemplateResponse("files.html", {"request": request})
-
 @app.get("/cloud", response_class=HTMLResponse)
 async def get_cloud_page(request: Request):
     return templates.TemplateResponse("cloud.html", {"request": request})
 
-# --- FILE TRANSFER API ---
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    safe_name = sanitize_filename(file.filename or "unnamed")
+    target_path = resolve_storage_path(safe_name)
+    file_bytes = await file.read()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with target_path.open("wb") as destination:
+        destination.write(file_bytes)
 
-@app.get("/api/files")
-async def list_files():
-    return {"files": get_active_files()}
+    if categorize_file(safe_name) == "image":
+        await generate_thumbnail_for_uploaded_file(target_path)
 
-@app.post("/api/files/upload")
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
-    # Datei speichern
-    content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
-        
-    expires_at = time.time() + 300  # 5 Minuten (300 Sekunden)
-    uploaded_files[file.filename] = {
-        "size": len(content),
-        "expires_at": expires_at
+    if categorize_file(safe_name) == "office":
+        preview_pdf = FILES_DIR / f"{target_path.stem}.preview.pdf"
+        if preview_pdf.exists():
+            preview_pdf.unlink()
+        convert_office_to_pdf(target_path, FILES_DIR)
+
+    return {
+        "status": "ok",
+        "filename": safe_name,
+        "category": categorize_file(safe_name),
+        "badge": badge_for_extension(safe_name),
+        "thumbnail": bool(thumbnail_path_for(safe_name).exists()),
+        "size": len(file_bytes),
+        "metadata": get_file_entry(target_path),
     }
-    
-    # Löschauftrag im Hintergrund starten
-    background_tasks.add_task(delete_file_after_delay, file.filename, 300)
-    
-    return {"status": "ok", "filename": file.filename}
 
-@app.get("/api/files/download/{filename}")
+@app.get("/view/{filename}")
+async def view_file(filename: str, request: Request):
+    file_path = resolve_storage_path(filename)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden.")
+
+    category = categorize_file(file_path.name)
+    if category == "office":
+        pdf_preview = FILES_DIR / f"{file_path.stem}.preview.pdf"
+        if pdf_preview.exists():
+            return await stream_file_range(request, pdf_preview, "application/pdf")
+        if convert_office_to_pdf(file_path, FILES_DIR):
+            return await stream_file_range(request, FILES_DIR / f"{file_path.stem}.pdf", "application/pdf")
+
+    media_type = file_mime_type(file_path.name)
+    if category in {"audio", "video"}:
+        return await stream_file_range(request, file_path, media_type)
+    return FileResponse(path=file_path, media_type=media_type, filename=file_path.name)
+
+@app.get("/view-text/{filename}")
+async def view_text_file(filename: str):
+    file_path = resolve_storage_path(filename)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden.")
+
+    category = categorize_file(file_path.name)
+    if category not in {"text", "code"}:
+        raise HTTPException(status_code=400, detail="Diese Datei kann nicht als Text angezeigt werden.")
+
+    text = read_text_file(file_path)
+    return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+
+@app.get("/download/{filename}")
 async def download_file(filename: str):
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    if os.path.exists(file_path) and filename in uploaded_files:
-        return FileResponse(path=file_path, filename=filename)
-    return HTMLResponse(content="Datei nicht gefunden oder bereits abgelaufen.", status_code=404)
+    file_path = resolve_storage_path(filename)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden.")
+    return FileResponse(path=file_path, filename=file_path.name, media_type=file_mime_type(file_path.name))
+
+@app.get("/thumbnail/{filename}")
+async def get_thumbnail(filename: str):
+    file_path = resolve_storage_path(filename)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden.")
+    thumbnail = thumbnail_path_for(file_path.name)
+    if not thumbnail.exists():
+        if categorize_file(file_path.name) == "image":
+            await generate_thumbnail_for_uploaded_file(file_path)
+        if not thumbnail.exists():
+            raise HTTPException(status_code=404, detail="Kein Thumbnail verfügbar.")
+    return FileResponse(path=thumbnail, media_type="image/jpeg")
+
 
 # --- PERSISTENT CLOUD STORAGE API ---
 
@@ -221,7 +547,39 @@ async def list_cloud_files(folder_id: int = 1):
         while current:
             breadcrumbs.append({"id": current["id"], "name": current["name"]})
             current = database.execute("SELECT id, name, parent_id FROM cloud_folders WHERE id = ?", (current["parent_id"],)).fetchone() if current["parent_id"] else None
-        return {"folder": dict(folder), "breadcrumbs": list(reversed(breadcrumbs)), "folders": [dict(item) for item in folders], "files": [dict(item) for item in files]}
+        prepared_files = []
+        for item in files:
+            record = dict(item)
+            record["preview_kind"] = preview_kind_for_file(record["filename"])
+            record["mime_type"] = file_mime_type(record["filename"])
+            record["has_preview"] = record["preview_kind"] in {"image", "pdf", "text", "audio", "video"}
+            prepared_files.append(record)
+        return {"folder": dict(folder), "breadcrumbs": list(reversed(breadcrumbs)), "folders": [dict(item) for item in folders], "files": prepared_files}
+
+@app.get("/api/cloud/files/{file_id}/preview")
+async def preview_cloud_file(file_id: int):
+    with cloud_db() as database:
+        file = database.execute(
+            "SELECT id, name, size FROM cloud_files WHERE id = ?",
+            (file_id,),
+        ).fetchone()
+        if not file:
+            raise HTTPException(status_code=404, detail="Datei nicht gefunden.")
+        chunks = database.execute(
+            "SELECT content FROM cloud_file_chunks WHERE file_id = ? ORDER BY chunk_index",
+            (file_id,),
+        ).fetchall()
+        content = b"".join(chunk["content"] for chunk in chunks)
+
+    media_type = file_mime_type(file["name"])
+    preview_kind = preview_kind_for_file(file["name"])
+    if preview_kind == "text":
+        try:
+            payload = content.decode("utf-8")
+        except UnicodeDecodeError:
+            payload = content.decode("utf-8", errors="replace")
+        return PlainTextResponse(payload, media_type=media_type)
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": f'inline; filename="{file["name"]}"'})
 
 @app.post("/api/cloud/upload")
 async def upload_cloud_file(file: UploadFile = File(...), folder_id: int = 1):

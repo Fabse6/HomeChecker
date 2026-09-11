@@ -73,6 +73,7 @@
         .row-actions a, .row-actions button { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; color: var(--ink); background: var(--panel-soft); text-decoration: none; font-size: .82rem; }
         .row-actions a:hover { color: var(--mint); border-color: var(--mint-strong); }
         .row-actions button:hover { color: #ff9c9c; border-color: #ff8585; }
+        .preview-link::before, .download-link::before, .delete-link::before { font-size: 1rem; }
         .empty { padding: 42px 15px; text-align: center; color: var(--muted); }
         .empty b { display: block; color: var(--ink); margin-bottom: 8px; }
         .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; padding: 12px 17px; border-radius: 10px; background: #e8f8e3; color: #102016; transition: .2s ease; }
@@ -99,8 +100,9 @@
             .toolbar { align-items: stretch; flex-direction: column; }
             .search { width: 100%; }
             .row-actions a, .row-actions button { font-size: 0; padding: 9px; }
-            .row-actions a::before { content: "↓"; font-size: 1rem; }
-            .row-actions button::before { content: "×"; font-size: 1rem; }
+            .preview-link::before { content: "↗"; }
+            .download-link::before { content: "↓"; }
+            .delete-link::before { content: "×"; }
         }
     </style>
 </head>
@@ -218,14 +220,32 @@
             });
             files.forEach(file => {
                 const row = document.createElement('div'); row.className = 'file-row';
-                const icon = document.createElement('div'); addText(icon, '▧', 'file-icon');
+                const icon = document.createElement('div');
+                const iconMap = { image: '🖼', pdf: '📄', text: '📝', code: '⌨', audio: '🎵', video: '🎬', download: '📁' };
+                addText(icon, iconMap[file.preview_kind] || '📁', 'file-icon');
                 const copy = document.createElement('div'); copy.className = 'file-copy';
                 const name = document.createElement('div'); addText(name, file.filename, 'file-name');
                 const meta = document.createElement('div'); addText(meta, `${formatBytes(file.size)} · ${new Date(file.modified_at * 1000).toLocaleDateString('de-DE')}`, 'file-meta');
                 copy.append(name, meta);
                 const actions = document.createElement('div'); actions.className = 'row-actions';
-                const download = document.createElement('a'); download.textContent = 'Download'; download.href = `/api/cloud/download/${file.id}`; download.download = '';
-                const remove = document.createElement('button'); remove.textContent = 'Löschen'; remove.onclick = () => removeFile(file.id);
+                if (file.has_preview) {
+                    const preview = document.createElement('a');
+                    preview.className = 'preview-link';
+                    preview.textContent = file.preview_kind === 'text' ? 'Vorschau' : 'Öffnen';
+                    preview.href = `/api/cloud/files/${file.id}/preview`;
+                    preview.target = '_blank';
+                    preview.rel = 'noopener';
+                    actions.appendChild(preview);
+                }
+                const download = document.createElement('a');
+                download.className = 'download-link';
+                download.textContent = 'Download';
+                download.href = `/api/cloud/download/${file.id}`;
+                download.download = '';
+                const remove = document.createElement('button');
+                remove.className = 'delete-link';
+                remove.textContent = 'Löschen';
+                remove.onclick = () => removeFile(file.id);
                 actions.append(download, remove); row.append(icon, copy, actions); fileList.appendChild(row);
             });
         }
