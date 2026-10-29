@@ -22,9 +22,28 @@ class PlayersDatabase:
                 name TEXT NOT NULL UNIQUE,
                 average REAL DEFAULT 0.0,
                 darts_thrown INTEGER DEFAULT 0,
-                Score INTEGER DEFAULT 0
+                Score INTEGER DEFAULT 0,
+                count_180 INTEGER NOT NULL DEFAULT 0,
+                count_140_plus INTEGER NOT NULL DEFAULT 0,
+                count_100_plus INTEGER NOT NULL DEFAULT 0,
+                legs_played INTEGER NOT NULL DEFAULT 0,
+                first9_score INTEGER NOT NULL DEFAULT 0,
+                first9_darts INTEGER NOT NULL DEFAULT 0
             )
         """)
+        existing_columns = {
+            column[1] for column in cursor.execute("PRAGMA table_info(players)")
+        }
+        for column, definition in (
+            ("count_180", "INTEGER NOT NULL DEFAULT 0"),
+            ("count_140_plus", "INTEGER NOT NULL DEFAULT 0"),
+            ("count_100_plus", "INTEGER NOT NULL DEFAULT 0"),
+            ("legs_played", "INTEGER NOT NULL DEFAULT 0"),
+            ("first9_score", "INTEGER NOT NULL DEFAULT 0"),
+            ("first9_darts", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in existing_columns:
+                cursor.execute(f"ALTER TABLE players ADD COLUMN {column} {definition}")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS saved_game (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -53,11 +72,27 @@ class PlayersDatabase:
     def get_all_players(self):
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, name, average, darts_thrown, Score FROM players ORDER BY name"
+            """
+            SELECT id, name, average, darts_thrown, Score,
+                   count_180, count_140_plus, count_100_plus, legs_played,
+                   first9_score, first9_darts
+            FROM players ORDER BY name
+            """
         )
         return cursor.fetchall()
 
-    def update_player(self, name=None, darts_thrown=None, Score=None):
+    def update_player(
+        self,
+        name=None,
+        darts_thrown=None,
+        Score=None,
+        count_180=None,
+        count_140_plus=None,
+        count_100_plus=None,
+        legs_played=None,
+        first9_score=None,
+        first9_darts=None,
+    ):
         if name is None:
             return
         cursor = self.conn.cursor()
@@ -68,10 +103,49 @@ class PlayersDatabase:
                 else 0.0
             )
             cursor.execute(
-                "UPDATE players SET darts_thrown = ?, Score = ?, average = ? WHERE name = ?",
-                (darts_thrown, Score, average, name),
+                """
+                UPDATE players
+                SET darts_thrown = ?, Score = ?, average = ?,
+                    count_180 = COALESCE(?, count_180),
+                    count_140_plus = COALESCE(?, count_140_plus),
+                    count_100_plus = COALESCE(?, count_100_plus),
+                    legs_played = COALESCE(?, legs_played),
+                    first9_score = COALESCE(?, first9_score),
+                    first9_darts = COALESCE(?, first9_darts)
+                WHERE name = ?
+                """,
+                (
+                    darts_thrown, Score, average, count_180, count_140_plus,
+                    count_100_plus, legs_played, first9_score, first9_darts, name,
+                ),
             )
         self.conn.commit()
+
+    def get_player_statistics(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT name, average, darts_thrown, Score,
+                   count_180, count_140_plus, count_100_plus, legs_played,
+                   first9_score, first9_darts
+            FROM players
+            ORDER BY name COLLATE NOCASE
+        """)
+        return [
+            {
+                "name": row[0],
+                "average": row[1],
+                "darts_thrown": row[2],
+                "score": row[3],
+                "count_180": row[4],
+                "count_140_plus": row[5],
+                "count_100_plus": row[6],
+                "legs_played": row[7],
+                "first9_average": (
+                    row[8] / row[9] * 3 if row[9] else 0
+                ),
+            }
+            for row in cursor.fetchall()
+        ]
 
     def delete_player(self, name):
         if not name or name == BOT_NAME:
@@ -152,6 +226,30 @@ class dartgame:
         self.mode = state["mode"]
         self.history = state["history"]
         self.pending_checkout = state["pending_checkout"]
+        players_by_name = {
+            row[1]: row for row in self.player_db.get_all_players()
+        }
+        for player in self.active_players:
+            player_row = players_by_name.get(player["name"])
+            player.setdefault("count_180", player_row[5] if player_row else 0)
+            player.setdefault("count_140_plus", player_row[6] if player_row else 0)
+            player.setdefault("count_100_plus", player_row[7] if player_row else 0)
+            player.setdefault("legs_played", player_row[8] if player_row else 0)
+            player.setdefault("first9_score", player_row[9] if player_row else 0)
+            player.setdefault("first9_darts", player_row[10] if player_row else 0)
+            if self.mode == "501":
+                player.setdefault("leg_darts_thrown", 0)
+        for snapshot in self.history:
+            for player in snapshot.get("active_players", []):
+                player_row = players_by_name.get(player["name"])
+                player.setdefault("count_180", player_row[5] if player_row else 0)
+                player.setdefault("count_140_plus", player_row[6] if player_row else 0)
+                player.setdefault("count_100_plus", player_row[7] if player_row else 0)
+                player.setdefault("legs_played", player_row[8] if player_row else 0)
+                player.setdefault("first9_score", player_row[9] if player_row else 0)
+                player.setdefault("first9_darts", player_row[10] if player_row else 0)
+                if self.mode == "501":
+                    player.setdefault("leg_darts_thrown", 0)
 
     def _persist_game_state(self, winner=False):
         if winner or not self.active_players:
@@ -267,6 +365,13 @@ class dartgame:
                         "match_score": 0,
                         "darts_thrown": 0,
                         "average": 0,
+                        "count_180": p[5],
+                        "count_140_plus": p[6],
+                        "count_100_plus": p[7],
+                        "legs_played": p[8],
+                        "first9_score": p[9],
+                        "first9_darts": p[10],
+                        "leg_darts_thrown": 0,
                     })
                 else:
                     self.active_players.append({
@@ -275,6 +380,12 @@ class dartgame:
                         "legs": 0,
                         "darts": p[3],
                         "total_score": p[4],
+                        "count_180": p[5],
+                        "count_140_plus": p[6],
+                        "count_100_plus": p[7],
+                        "legs_played": p[8],
+                        "first9_score": p[9],
+                        "first9_darts": p[10],
                         "cricket": {
                             "20": 0,
                             "19": 0,
@@ -324,34 +435,69 @@ class dartgame:
             state = self._update_501(score_thrown_or_data)
         else:
             state = self._update_cricket(score_thrown_or_data)
+        self._persist_player_statistics()
         self._persist_game_state(winner=bool(state.get("winner")))
         return state
 
     def _update_501(self, score_thrown):
         current_p = self.active_players[self.current_player_index]
-        new_score = current_p["score"] - int(score_thrown)
+        score_thrown = int(score_thrown)
+        new_score = current_p["score"] - score_thrown
 
         if new_score < 0 or new_score == 1:
             current_p["darts"] += 3
             current_p["darts_thrown"] += 3
+            self._record_first9_darts(current_p, 0, 3)
             current_p["average"] = current_p["match_score"] / current_p["darts_thrown"] * 3
             self.current_player_index = (self.current_player_index + 1) % len(self.active_players)
         elif new_score == 0:
             current_p["score"] = 0
             self.pending_checkout = {
                 "player_index": self.current_player_index,
-                "score": int(score_thrown),
+                "score": score_thrown,
             }
             return self.get_game_state()
         else:
             current_p["score"] = new_score
             current_p["darts"] += 3
-            current_p["total_score"] += int(score_thrown)
-            current_p["match_score"] += int(score_thrown)
+            current_p["total_score"] += score_thrown
+            current_p["match_score"] += score_thrown
             current_p["darts_thrown"] += 3
+            self._record_501_visit(current_p, score_thrown, 3)
             current_p["average"] = current_p["match_score"] / current_p["darts_thrown"] * 3
             self.current_player_index = (self.current_player_index + 1) % len(self.active_players)
         return self.get_game_state()
+
+    @staticmethod
+    def _record_first9_darts(player, score, darts_used):
+        darts_to_count = min(darts_used, max(0, 9 - player["leg_darts_thrown"]))
+        if darts_to_count:
+            player["first9_score"] += score
+            player["first9_darts"] += darts_to_count
+        player["leg_darts_thrown"] += darts_used
+
+    def _record_501_visit(self, player, score, darts_used):
+        if score == 180:
+            player["count_180"] += 1
+        if score >= 140:
+            player["count_140_plus"] += 1
+        if score >= 100:
+            player["count_100_plus"] += 1
+        self._record_first9_darts(player, score, darts_used)
+
+    def _persist_player_statistics(self):
+        for player in self.active_players:
+            self.player_db.update_player(
+                player["name"],
+                player["darts"],
+                player["total_score"],
+                player.get("count_180", 0),
+                player.get("count_140_plus", 0),
+                player.get("count_100_plus", 0),
+                player.get("legs_played", 0),
+                player.get("first9_score", 0),
+                player.get("first9_darts", 0),
+            )
 
     def confirm_checkout(self, darts_used):
         if self.pending_checkout is None:
@@ -366,21 +512,22 @@ class dartgame:
         current_p["total_score"] += pending["score"]
         current_p["match_score"] += pending["score"]
         current_p["darts_thrown"] += darts_used
+        self._record_501_visit(current_p, pending["score"], darts_used)
+        for player in self.active_players:
+            player["legs_played"] += 1
+            player["leg_darts_thrown"] = 0
         current_p["average"] = (
             current_p["match_score"] / current_p["darts_thrown"] * 3
             if current_p["darts_thrown"] > 0
             else 0
         )
         self.pending_checkout = None
+        self._persist_player_statistics()
 
         self.starting_player_index = (self.starting_player_index + 1) % len(self.active_players)
         self.current_player_index = self.starting_player_index
         if current_p["legs"] >= self.legs_to_win:
             self.starting_player_index = 0
-            for player in self.active_players:
-                self.player_db.update_player(
-                    player["name"], player["darts"], player["total_score"]
-                )
             state = {
                 "active_players": self.active_players,
                 "next_player": current_p["name"],
@@ -417,9 +564,8 @@ class dartgame:
         current_p = self.active_players[self.current_player_index]
         if self._has_cricket_winner(current_p):
             for p in self.active_players:
-                self.player_db.update_player(
-                    p["name"], p["darts"], p["total_score"]
-                )
+                p["legs_played"] += 1
+            self._persist_player_statistics()
             return {
                 "active_players": self.active_players,
                 "next_player": current_p["name"],
@@ -474,5 +620,6 @@ class dartgame:
         self.pending_checkout = last_state["pending_checkout"]
 
         state = self.get_game_state()
+        self._persist_player_statistics()
         self._persist_game_state()
         return state

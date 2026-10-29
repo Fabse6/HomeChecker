@@ -116,6 +116,14 @@ async def get_dart_lobby(request: Request):
         },
     )
 
+@app.get("/stats", response_class=HTMLResponse)
+async def get_player_statistics(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="statistics.html",
+        context={"player_statistics": game.player_db.get_player_statistics()},
+    )
+
 @app.get("/dart/game", response_class=HTMLResponse)
 async def get_game_page(request: Request):
     return templates.TemplateResponse(request=request, name="game.html")

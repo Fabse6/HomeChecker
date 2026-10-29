@@ -35,8 +35,8 @@ class TestPlayersDatabase(unittest.TestCase):
 
 class TestBotBehavior(unittest.TestCase):
     def test_bot_uses_finish_chance_when_remaining_below_100(self):
-        game = dartgame()
-        game.player_db = PlayersDatabase(':memory:')
+        game = dartgame(':memory:')
+        game.player_db.add_player('Alice')
         game.players = game.player_db.get_all_players()
         game.start_game(['Alice', BOT_NAME], legs_to_win=1, mode='501')
 
@@ -46,13 +46,15 @@ class TestBotBehavior(unittest.TestCase):
         self.assertEqual(score, 60)
 
     def test_bot_throws_around_50_points_on_regular_turns(self):
-        game = dartgame()
-        game.player_db = PlayersDatabase(':memory:')
+        game = dartgame(':memory:')
+        game.player_db.add_player('Alice')
         game.players = game.player_db.get_all_players()
         game.start_game(['Alice', BOT_NAME], legs_to_win=1, mode='501')
 
         game.active_players[1]['score'] = 180
-        with patch('dartlogic.random.random', return_value=0.8):
+        with patch('dartlogic.random.random', return_value=0.8), patch(
+            'dartlogic.random.gauss', return_value=50
+        ):
             score = game._generate_bot_score(game.active_players[1])
         self.assertGreaterEqual(score, 20)
         self.assertLessEqual(score, 90)
@@ -60,8 +62,7 @@ class TestBotBehavior(unittest.TestCase):
 
 class TestCheckoutDarts(unittest.TestCase):
     def setUp(self):
-        self.game = dartgame()
-        self.game.player_db = PlayersDatabase(':memory:')
+        self.game = dartgame(':memory:')
         self.game.player_db.add_player('Alice')
         self.game.start_game(['Alice'], legs_to_win=2, mode='501')
         self.game.active_players[0]['score'] = 40
@@ -156,6 +157,25 @@ class TestSavedGamePersistence(unittest.TestCase):
             restored_game.discard_saved_game()
             self.assertIsNone(dartgame(database_path).get_saved_game_summary())
 
+    def test_scoring_statistics_survive_game_instance_restart(self):
+        with TemporaryDirectory() as directory:
+            database_path = f'{directory}/players.db'
+            game = dartgame(database_path)
+            game.player_db.add_player('Alice')
+            game.start_game(['Alice'], mode='501')
+            game.update_score(180)
+
+            restored_game = dartgame(database_path)
+
+            alice = next(
+                player for player in restored_game.player_db.get_player_statistics()
+                if player['name'] == 'Alice'
+            )
+            self.assertEqual(alice['count_180'], 1)
+            self.assertEqual(alice['count_140_plus'], 1)
+            self.assertEqual(alice['count_100_plus'], 1)
+            self.assertEqual(alice['first9_average'], 180)
+
     def test_cricket_marks_and_current_player_survive_restart(self):
         with TemporaryDirectory() as directory:
             database_path = f'{directory}/players.db'
@@ -171,6 +191,96 @@ class TestSavedGamePersistence(unittest.TestCase):
             self.assertEqual(restored_game.current_player_index, 1)
             self.assertEqual(restored_game.active_players[0]['cricket']['20'], 3)
             self.assertEqual(restored_game.active_players[1]['name'], 'Bob')
+
+class TestPlayerStatistics(unittest.TestCase):
+    def test_scoring_visits_update_lifetime_stats_and_first_nine_average(self):
+        game = dartgame(':memory:')
+        game.player_db.add_player('Alice')
+        game.start_game(['Alice'], legs_to_win=1, mode='501')
+
+        game.update_score(180)
+        game.update_score(140)
+        game.update_score(80)
+        game.active_players[0]['score'] = 101
+        game.update_score(101)
+        game.confirm_checkout(2)
+
+        stats = game.player_db.get_player_statistics()
+        alice = next(player for player in stats if player['name'] == 'Alice')
+        self.assertEqual(alice['count_180'], 1)
+        self.assertEqual(alice['count_140_plus'], 2)
+        self.assertEqual(alice['count_100_plus'], 3)
+        self.assertEqual(alice['legs_played'], 1)
+        self.assertAlmostEqual(alice['first9_average'], 400 / 9 * 3)
+        self.assertAlmostEqual(alice['average'], 501 / 11 * 3, places=2)
+
+    def test_bust_counts_darts_but_not_invalid_high_score(self):
+        game = dartgame(':memory:')
+        game.player_db.add_player('Alice')
+        game.start_game(['Alice'], mode='501')
+        game.active_players[0]['score'] = 100
+
+        game.update_score(180)
+
+        stats = next(
+            player for player in game.player_db.get_player_statistics()
+            if player['name'] == 'Alice'
+        )
+        self.assertEqual(stats['count_180'], 0)
+        self.assertEqual(stats['count_140_plus'], 0)
+        self.assertEqual(stats['count_100_plus'], 0)
+        self.assertEqual(stats['darts_thrown'], 3)
+        self.assertEqual(stats['first9_average'], 0)
+
+    def test_undo_restores_lifetime_statistics(self):
+        game = dartgame(':memory:')
+        game.player_db.add_player('Alice')
+        game.start_game(['Alice'], mode='501')
+        game.update_score(180)
+
+        updated = next(
+            player for player in game.player_db.get_player_statistics()
+            if player['name'] == 'Alice'
+        )
+        self.assertEqual(updated['count_180'], 1)
+
+        game.go_back()
+        restored = next(
+            player for player in game.player_db.get_player_statistics()
+            if player['name'] == 'Alice'
+        )
+        self.assertEqual(restored['count_180'], 0)
+        self.assertEqual(restored['darts_thrown'], 0)
+        self.assertEqual(restored['score'], 0)
+
+    def test_existing_player_database_is_migrated(self):
+        with TemporaryDirectory() as directory:
+            database_path = f'{directory}/players.db'
+            import sqlite3
+            with sqlite3.connect(database_path) as connection:
+                connection.execute("""
+                    CREATE TABLE players (
+                        id INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE,
+                        average REAL DEFAULT 0.0,
+                        darts_thrown INTEGER DEFAULT 0,
+                        Score INTEGER DEFAULT 0
+                    )
+                """)
+                connection.execute(
+                    "INSERT INTO players (name, average, darts_thrown, Score) VALUES (?, ?, ?, ?)",
+                    ('Alice', 40.0, 3, 40),
+                )
+
+            database = PlayersDatabase(database_path)
+
+            alice = next(
+                player for player in database.get_player_statistics()
+                if player['name'] == 'Alice'
+            )
+            self.assertEqual(alice['average'], 40.0)
+            self.assertEqual(alice['count_180'], 0)
+            self.assertEqual(alice['legs_played'], 0)
 
 
 if __name__ == '__main__':
