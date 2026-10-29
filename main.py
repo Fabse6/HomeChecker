@@ -107,7 +107,14 @@ async def get_index(request: Request):
 @app.get("/dart", response_class=HTMLResponse)
 async def get_dart_lobby(request: Request):
     players = game.refresh_players()
-    return templates.TemplateResponse(request=request, name="index.html", context={"players": players})
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "players": players,
+            "saved_game": game.get_saved_game_summary(),
+        },
+    )
 
 @app.get("/dart/game", response_class=HTMLResponse)
 async def get_game_page(request: Request):
@@ -345,6 +352,11 @@ async def delete_player(data: dict):
 @app.post("/api/start-game")
 async def start_game(data: StartGameData):
     game.start_game(data.players, data.legs_to_win, data.mode)
+    return {"status": "ok"}
+
+@app.delete("/api/game/saved")
+async def discard_saved_game():
+    game.discard_saved_game()
     return {"status": "ok"}
 
 if __name__ == "__main__":

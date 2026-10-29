@@ -303,6 +303,40 @@
             cursor: not-allowed;
         }
 
+        .resume-dialog {
+            width: min(460px, calc(100% - 32px));
+            padding: 28px;
+            border: 1px solid #444;
+            border-radius: 20px;
+            background: #111;
+            color: white;
+        }
+
+        .resume-dialog::backdrop {
+            background: rgba(0, 0, 0, 0.78);
+        }
+
+        .resume-dialog h2 {
+            border: 0;
+            padding: 0;
+            margin-bottom: 12px;
+        }
+
+        .resume-dialog-actions {
+            display: grid;
+            gap: 12px;
+            margin-top: 22px;
+        }
+
+        .resume-dialog-actions button {
+            cursor: pointer;
+        }
+
+        .resume-dialog-actions button:disabled {
+            cursor: wait;
+            opacity: 0.6;
+        }
+
         @media (max-width: 520px) {
             body {
                 padding: 12px 10px 20px;
@@ -383,11 +417,55 @@
         </div>
     </div>
 
+    {% if saved_game %}
+    <dialog id="resumeGameDialog" class="resume-dialog" aria-labelledby="resumeGameTitle">
+        <h2 id="resumeGameTitle">Spielstand gefunden</h2>
+        <p id="resumeGameSummary"></p>
+        <p>Möchtest du das Spiel fortsetzen oder einen neuen Spielstand beginnen?</p>
+        <div class="resume-dialog-actions">
+            <button type="button" class="btn-primary" onclick="resumeSavedGame()">Spiel fortsetzen</button>
+            <button type="button" class="mode-button" onclick="discardSavedGame()">Neues Spiel beginnen</button>
+        </div>
+    </dialog>
+    {% endif %}
+
 <script>
     const ws = new WebSocket(`ws://${window.location.host}/ws`);
     let selectedPlayers = [];
     let selectedMode = '501';
     let allPlayers = {{ players|tojson }};
+    const savedGame = {{ saved_game|tojson }};
+
+    if (savedGame) {
+        const resumeDialog = document.getElementById('resumeGameDialog');
+        const players = savedGame.players.map(player =>
+            `${player.name} (${player.legs} Legs)`
+        ).join(', ');
+        const mode = savedGame.mode === 'cricket' ? 'Cricket' : '501';
+        document.getElementById('resumeGameSummary').textContent =
+            `${mode} · ${players} · ${savedGame.legs_to_win} Legs zum Sieg`;
+        resumeDialog.showModal();
+        resumeDialog.addEventListener('cancel', (event) => event.preventDefault());
+    }
+
+    function resumeSavedGame() {
+        window.location.href = savedGame.mode === 'cricket' ? '/dart/cricket' : '/dart/game';
+    }
+
+    async function discardSavedGame() {
+        const buttons = document.querySelectorAll('#resumeGameDialog button');
+        buttons.forEach(button => button.disabled = true);
+        try {
+            const response = await fetch('/api/game/saved', { method: 'DELETE' });
+            if (!response.ok) {
+                throw new Error(`Spielstand konnte nicht verworfen werden (${response.status}).`);
+            }
+            document.getElementById('resumeGameDialog').close();
+        } catch (error) {
+            buttons.forEach(button => button.disabled = false);
+            alert(error.message);
+        }
+    }
 
     function renderPlayerList(players) {
         const list = document.getElementById('playerList');

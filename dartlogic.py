@@ -1,7 +1,9 @@
 import random
+import json
 import sqlite3
 
 BOT_NAME = "Bot"
+SAVED_GAME_VERSION = 1
 
 
 class PlayersDatabase:
@@ -21,6 +23,13 @@ class PlayersDatabase:
                 average REAL DEFAULT 0.0,
                 darts_thrown INTEGER DEFAULT 0,
                 Score INTEGER DEFAULT 0
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS saved_game (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
         self.conn.commit()
@@ -71,11 +80,35 @@ class PlayersDatabase:
         cursor.execute("DELETE FROM players WHERE name = ?", (name,))
         self.conn.commit()
 
+    def save_game_state(self, state):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO saved_game (id, state_json, updated_at)
+            VALUES (1, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                state_json = excluded.state_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (json.dumps(state),),
+        )
+        self.conn.commit()
+
+    def load_game_state(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT state_json FROM saved_game WHERE id = 1")
+        row = cursor.fetchone()
+        return json.loads(row[0]) if row else None
+
+    def clear_game_state(self):
+        self.conn.execute("DELETE FROM saved_game WHERE id = 1")
+        self.conn.commit()
+
 
 class dartgame:
 
-    def __init__(self):
-        self.player_db = PlayersDatabase("players.db")
+    def __init__(self, player_db_connection="players.db"):
+        self.player_db = PlayersDatabase(player_db_connection)
         self.players = self.player_db.get_all_players()
         self.active_players = []
         self.current_player_index = 0
@@ -84,6 +117,79 @@ class dartgame:
         self.mode = "501"
         self.history = []
         self.pending_checkout = None
+        self._restore_saved_game()
+
+    def _restore_saved_game(self):
+        state = self.player_db.load_game_state()
+        if state is None:
+            return
+        if (
+            not isinstance(state, dict)
+            or state.get("version") != SAVED_GAME_VERSION
+            or not isinstance(state.get("active_players"), list)
+            or not state["active_players"]
+            or not isinstance(state.get("history"), list)
+            or state.get("mode") not in {"501", "cricket"}
+            or not isinstance(state.get("legs_to_win"), int)
+            or state["legs_to_win"] < 1
+        ):
+            raise ValueError("Der gespeicherte Spielstand ist ungültig oder nicht unterstützt.")
+
+        current_player_index = state.get("current_player_index")
+        starting_player_index = state.get("starting_player_index")
+        if (
+            not isinstance(current_player_index, int)
+            or not 0 <= current_player_index < len(state["active_players"])
+            or not isinstance(starting_player_index, int)
+            or not 0 <= starting_player_index < len(state["active_players"])
+        ):
+            raise ValueError("Der gespeicherte Spielstand enthält einen ungültigen Spielerzug.")
+
+        self.active_players = state["active_players"]
+        self.current_player_index = current_player_index
+        self.starting_player_index = starting_player_index
+        self.legs_to_win = state["legs_to_win"]
+        self.mode = state["mode"]
+        self.history = state["history"]
+        self.pending_checkout = state["pending_checkout"]
+
+    def _persist_game_state(self, winner=False):
+        if winner or not self.active_players:
+            self.player_db.clear_game_state()
+            return
+
+        self.player_db.save_game_state({
+            "version": SAVED_GAME_VERSION,
+            "active_players": self.active_players,
+            "current_player_index": self.current_player_index,
+            "starting_player_index": self.starting_player_index,
+            "legs_to_win": self.legs_to_win,
+            "mode": self.mode,
+            "history": self.history,
+            "pending_checkout": self.pending_checkout,
+        })
+
+    def get_saved_game_summary(self):
+        if not self.active_players:
+            return None
+        return {
+            "players": [
+                {"name": player["name"], "legs": player["legs"]}
+                for player in self.active_players
+            ],
+            "mode": self.mode,
+            "legs_to_win": self.legs_to_win,
+            "awaiting_checkout_darts": self.pending_checkout is not None,
+        }
+
+    def discard_saved_game(self):
+        self.active_players = []
+        self.current_player_index = 0
+        self.starting_player_index = 0
+        self.history = []
+        self.pending_checkout = None
+        self.player_db.clear_game_state()
+
 
     def refresh_players(self):
         self.players = self.player_db.get_all_players()
@@ -181,6 +287,7 @@ class dartgame:
                     })
 
         self.current_player_index = 0
+        self._persist_game_state()
         return self.get_game_state()
 
     def get_game_state(self):
@@ -208,13 +315,17 @@ class dartgame:
         snapshot = {
             "active_players": copy.deepcopy(self.active_players),
             "current_player_index": self.current_player_index,
+            "starting_player_index": self.starting_player_index,
             "pending_checkout": copy.deepcopy(self.pending_checkout),
         }
         self.history.append(snapshot)
 
         if self.mode == "501":
-            return self._update_501(score_thrown_or_data)
-        return self._update_cricket(score_thrown_or_data)
+            state = self._update_501(score_thrown_or_data)
+        else:
+            state = self._update_cricket(score_thrown_or_data)
+        self._persist_game_state(winner=bool(state.get("winner")))
+        return state
 
     def _update_501(self, score_thrown):
         current_p = self.active_players[self.current_player_index]
@@ -270,21 +381,27 @@ class dartgame:
                 self.player_db.update_player(
                     player["name"], player["darts"], player["total_score"]
                 )
-            return {
+            state = {
                 "active_players": self.active_players,
                 "next_player": current_p["name"],
                 "winner": current_p["name"],
                 "mode": self.mode,
                 "awaiting_checkout_darts": False,
             }
+            self._persist_game_state(winner=True)
+            return state
 
         for player in self.active_players:
             player["score"] = 501
-        return self.get_game_state()
+        state = self.get_game_state()
+        self._persist_game_state()
+        return state
 
     def _update_cricket(self, data):
         if not isinstance(data, dict):
-            return self.get_game_state()
+            state = self.get_game_state()
+            self._persist_game_state()
+            return state
 
         shots = data.get("shots")
         if not shots:
@@ -351,6 +468,11 @@ class dartgame:
         last_state = self.history.pop()
         self.active_players = last_state["active_players"]
         self.current_player_index = last_state["current_player_index"]
+        self.starting_player_index = last_state.get(
+            "starting_player_index", self.starting_player_index
+        )
         self.pending_checkout = last_state["pending_checkout"]
 
-        return self.get_game_state()
+        state = self.get_game_state()
+        self._persist_game_state()
+        return state

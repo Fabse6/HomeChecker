@@ -1,4 +1,5 @@
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from dartlogic import BOT_NAME, PlayersDatabase, dartgame
@@ -111,6 +112,65 @@ class TestCheckoutDarts(unittest.TestCase):
         self.assertEqual(state['winner'], 'Bot')
         self.assertFalse(state['awaiting_checkout_darts'])
         self.assertEqual(self.game.active_players[0]['darts'], 3)
+
+
+class TestSavedGamePersistence(unittest.TestCase):
+    def test_match_state_and_undo_history_survive_game_instance_restart(self):
+        with TemporaryDirectory() as directory:
+            database_path = f'{directory}/players.db'
+            game = dartgame(database_path)
+            game.player_db.add_player('Alice')
+            game.start_game(['Alice'], legs_to_win=2, mode='501')
+            game.update_score(60)
+
+            restored_game = dartgame(database_path)
+
+            self.assertEqual(restored_game.mode, '501')
+            self.assertEqual(restored_game.legs_to_win, 2)
+            self.assertEqual(restored_game.current_player_index, 0)
+            self.assertEqual(restored_game.active_players[0]['score'], 441)
+            self.assertEqual(restored_game.active_players[0]['darts_thrown'], 3)
+            self.assertEqual(restored_game.active_players[0]['match_score'], 60)
+            self.assertEqual(len(restored_game.history), 1)
+
+            restored_game.go_back()
+            self.assertEqual(restored_game.active_players[0]['score'], 501)
+
+    def test_pending_checkout_survives_restart_and_can_be_confirmed(self):
+        with TemporaryDirectory() as directory:
+            database_path = f'{directory}/players.db'
+            game = dartgame(database_path)
+            game.player_db.add_player('Alice')
+            game.start_game(['Alice'], legs_to_win=2, mode='501')
+            game.active_players[0]['score'] = 40
+            game.update_score(40)
+
+            restored_game = dartgame(database_path)
+
+            self.assertTrue(restored_game.get_game_state()['awaiting_checkout_darts'])
+            self.assertEqual(restored_game.pending_checkout['score'], 40)
+            state = restored_game.confirm_checkout(2)
+            self.assertEqual(state['active_players'][0]['legs'], 1)
+            self.assertEqual(state['active_players'][0]['darts_thrown'], 2)
+
+            restored_game.discard_saved_game()
+            self.assertIsNone(dartgame(database_path).get_saved_game_summary())
+
+    def test_cricket_marks_and_current_player_survive_restart(self):
+        with TemporaryDirectory() as directory:
+            database_path = f'{directory}/players.db'
+            game = dartgame(database_path)
+            game.player_db.add_player('Alice')
+            game.player_db.add_player('Bob')
+            game.start_game(['Alice', 'Bob'], mode='cricket')
+            game.update_score({'shots': [{'target': '20', 'multiplier': 3}]})
+
+            restored_game = dartgame(database_path)
+
+            self.assertEqual(restored_game.mode, 'cricket')
+            self.assertEqual(restored_game.current_player_index, 1)
+            self.assertEqual(restored_game.active_players[0]['cricket']['20'], 3)
+            self.assertEqual(restored_game.active_players[1]['name'], 'Bob')
 
 
 if __name__ == '__main__':
