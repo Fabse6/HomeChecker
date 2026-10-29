@@ -92,6 +92,7 @@ class TestCheckoutDarts(unittest.TestCase):
         self.assertEqual(player['legs'], 2)
         self.assertEqual(player['darts'], 3)
         self.assertEqual(player['darts_thrown'], 3)
+        self.assertIsNone(self.game.get_saved_game_summary())
 
     def test_checkout_rejects_invalid_dart_count_and_can_be_undone(self):
         self.game.update_score(40)

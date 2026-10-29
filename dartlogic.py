@@ -268,16 +268,21 @@ class dartgame:
         })
 
     def get_saved_game_summary(self):
-        if not self.active_players:
+        state = self.player_db.load_game_state()
+        if state is None:
+            return None
+
+        players = state.get("active_players", [])
+        if not players:
             return None
         return {
             "players": [
-                {"name": player["name"], "legs": player["legs"]}
-                for player in self.active_players
+                {"name": player["name"], "legs": player.get("legs", 0)}
+                for player in players
             ],
-            "mode": self.mode,
-            "legs_to_win": self.legs_to_win,
-            "awaiting_checkout_darts": self.pending_checkout is not None,
+            "mode": state["mode"],
+            "legs_to_win": state["legs_to_win"],
+            "awaiting_checkout_darts": state.get("pending_checkout") is not None,
         }
 
     def discard_saved_game(self):
