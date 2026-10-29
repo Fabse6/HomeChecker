@@ -102,32 +102,32 @@ init_cloud_db()
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="home.html")
 
 @app.get("/dart", response_class=HTMLResponse)
 async def get_dart_lobby(request: Request):
     players = game.refresh_players()
-    return templates.TemplateResponse("index.html", {"request": request, "players": players})
+    return templates.TemplateResponse(request=request, name="index.html", context={"players": players})
 
 @app.get("/dart/game", response_class=HTMLResponse)
 async def get_game_page(request: Request):
-    return templates.TemplateResponse("game.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="game.html")
 
 @app.get("/dart/cricket", response_class=HTMLResponse)
 async def get_cricket_page(request: Request):
-    return templates.TemplateResponse("cricket.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="cricket.html")
 
 @app.get("/windows", response_class=HTMLResponse)
 async def get_windows_page(request: Request):
-    return templates.TemplateResponse("windows.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="windows.html")
 
 @app.get("/files", response_class=HTMLResponse)
 async def get_files_page(request: Request):
-    return templates.TemplateResponse("files.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="files.html")
 
 @app.get("/cloud", response_class=HTMLResponse)
 async def get_cloud_page(request: Request):
-    return templates.TemplateResponse("cloud.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="cloud.html")
 
 # --- FILE TRANSFER API ---
 
