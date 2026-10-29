@@ -57,5 +57,61 @@ class TestBotBehavior(unittest.TestCase):
         self.assertLessEqual(score, 90)
 
 
+class TestCheckoutDarts(unittest.TestCase):
+    def setUp(self):
+        self.game = dartgame()
+        self.game.player_db = PlayersDatabase(':memory:')
+        self.game.player_db.add_player('Alice')
+        self.game.start_game(['Alice'], legs_to_win=2, mode='501')
+        self.game.active_players[0]['score'] = 40
+
+    def test_checkout_waits_for_darts_used_and_counts_selected_amount(self):
+        pending_state = self.game.update_score(40)
+
+        self.assertTrue(pending_state['awaiting_checkout_darts'])
+        self.assertEqual(self.game.active_players[0]['legs'], 0)
+        self.assertEqual(self.game.active_players[0]['darts'], 0)
+        self.assertEqual(self.game.active_players[0]['darts_thrown'], 0)
+
+        leg_state = self.game.confirm_checkout(2)
+
+        player = self.game.active_players[0]
+        self.assertFalse(leg_state['awaiting_checkout_darts'])
+        self.assertEqual(player['legs'], 1)
+        self.assertEqual(player['darts'], 2)
+        self.assertEqual(player['darts_thrown'], 2)
+        self.assertEqual(player['score'], 501)
+
+        player['score'] = 40
+        self.game.update_score(40)
+        match_state = self.game.confirm_checkout(1)
+
+        self.assertEqual(match_state['winner'], 'Alice')
+        self.assertEqual(player['legs'], 2)
+        self.assertEqual(player['darts'], 3)
+        self.assertEqual(player['darts_thrown'], 3)
+
+    def test_checkout_rejects_invalid_dart_count_and_can_be_undone(self):
+        self.game.update_score(40)
+
+        with self.assertRaises(ValueError):
+            self.game.confirm_checkout(4)
+
+        restored_state = self.game.go_back()
+
+        self.assertFalse(restored_state['awaiting_checkout_darts'])
+        self.assertEqual(self.game.active_players[0]['score'], 40)
+        self.assertEqual(self.game.active_players[0]['legs'], 0)
+
+    def test_bot_checkout_uses_three_darts_without_waiting_for_user(self):
+        self.game.start_game(['Bot'], legs_to_win=1, mode='501')
+        with patch.object(self.game, '_generate_bot_score', return_value=501):
+            state = self.game.resolve_bot_turn()
+
+        self.assertEqual(state['winner'], 'Bot')
+        self.assertFalse(state['awaiting_checkout_darts'])
+        self.assertEqual(self.game.active_players[0]['darts'], 3)
+
+
 if __name__ == '__main__':
     unittest.main()

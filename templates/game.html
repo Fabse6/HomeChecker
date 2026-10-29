@@ -121,6 +121,43 @@
             text-align: center;
         }
 
+        .checkout-dialog {
+            width: min(420px, calc(100% - 32px));
+            padding: 28px;
+            border: 1px solid #444;
+            border-radius: 20px;
+            background: #111;
+            color: white;
+            text-align: center;
+        }
+
+        .checkout-dialog::backdrop {
+            background: rgba(0, 0, 0, 0.75);
+        }
+
+        .checkout-options {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 22px;
+        }
+
+        .checkout-options button {
+            padding: 16px 10px;
+            border: 0;
+            border-radius: 12px;
+            background: #00e676;
+            color: #070707;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .checkout-options button:disabled {
+            cursor: wait;
+            opacity: 0.6;
+        }
+
         .sidebar { 
             position: fixed; 
             top: 0; 
@@ -239,8 +276,21 @@
         </div>
     </div>
 
+    <dialog id="checkoutDialog" class="checkout-dialog" aria-labelledby="checkoutTitle">
+        <h2 id="checkoutTitle" style="font-size: 1.5rem;">Leg gewonnen!</h2>
+        <p id="checkoutMessage">Wie viele Pfeile hast du für den letzten Wurf benötigt?</p>
+        <div class="checkout-options">
+            <button type="button" onclick="confirmCheckout(1)">1 Pfeil</button>
+            <button type="button" onclick="confirmCheckout(2)">2 Pfeile</button>
+            <button type="button" onclick="confirmCheckout(3)">3 Pfeile</button>
+        </div>
+    </dialog>
+
 <script>
     const ws = new WebSocket(`ws://${window.location.host}/ws/game`);
+    const checkoutDialog = document.getElementById("checkoutDialog");
+    let checkoutConfirmationPending = false;
+    checkoutDialog.addEventListener("cancel", (event) => event.preventDefault());
 
     function toggleSidebar() {
         const sidebar = document.getElementById("sidebar");
@@ -249,14 +299,47 @@
 
     ws.onmessage = (event) => {
         const state = JSON.parse(event.data);
+        const confirmedCheckout = checkoutConfirmationPending;
         renderGame(state);
-        if (state.winner) {
+        if (state.awaiting_checkout_darts && !checkoutDialog.open) {
+            document.getElementById("checkoutMessage").innerText =
+                `${state.checkout_player} hat das Leg gewonnen. Wie viele Pfeile wurden im letzten Wurf benötigt?`;
+            checkoutDialog.showModal();
+        } else if (!state.awaiting_checkout_darts && checkoutDialog.open) {
+            checkoutDialog.close();
+            setCheckoutButtonsDisabled(false);
+        }
+        if (state.error) {
+            checkoutConfirmationPending = false;
+            alert(state.error);
+            setCheckoutButtonsDisabled(false);
+        }
+        if (state.winner && confirmedCheckout) {
+            checkoutConfirmationPending = false;
             setTimeout(() => {
                 alert("Herzlichen Glückwunsch, " + state.winner + " hat gewonnen!");
                 window.location.href = "/dart";
             }, 1000);
+        } else if (confirmedCheckout && !state.awaiting_checkout_darts) {
+            checkoutConfirmationPending = false;
         }
     };
+
+    function setCheckoutButtonsDisabled(disabled) {
+        checkoutDialog.querySelectorAll("button").forEach(button => {
+            button.disabled = disabled;
+        });
+    }
+
+    function confirmCheckout(dartsUsed) {
+        if (ws.readyState !== WebSocket.OPEN) {
+            alert("Die Verbindung zum Spielserver ist unterbrochen.");
+            return;
+        }
+        setCheckoutButtonsDisabled(true);
+        checkoutConfirmationPending = true;
+        ws.send(JSON.stringify({ action: "checkout_darts", darts_used: dartsUsed }));
+    }
 
     function renderGame(state) {
         if (!state.active_players) return;

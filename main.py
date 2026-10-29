@@ -313,6 +313,19 @@ async def websocket_game(websocket: WebSocket):
                 if game.is_bot_turn() and not new_state.get("winner"):
                     await asyncio.sleep(0.2)
                     await websocket.send_json(game.resolve_bot_turn())
+            if data.get("action") == "checkout_darts":
+                try:
+                    new_state = game.confirm_checkout(data.get("darts_used"))
+                except ValueError as exc:
+                    await websocket.send_json({
+                        **game.get_game_state(),
+                        "error": str(exc),
+                    })
+                else:
+                    await websocket.send_json(new_state)
+                    if game.is_bot_turn() and not new_state.get("winner"):
+                        await asyncio.sleep(0.2)
+                        await websocket.send_json(game.resolve_bot_turn())
             if data.get("action") == "back":
                 new_state = game.go_back()
                 await websocket.send_json(new_state)

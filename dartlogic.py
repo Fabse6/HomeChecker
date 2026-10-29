@@ -83,6 +83,7 @@ class dartgame:
         self.legs_to_win = 1
         self.mode = "501"
         self.history = []
+        self.pending_checkout = None
 
     def refresh_players(self):
         self.players = self.player_db.get_all_players()
@@ -100,7 +101,11 @@ class dartgame:
         return self.players
 
     def is_bot_turn(self):
-        return bool(self.active_players) and self.active_players[self.current_player_index]["name"] == BOT_NAME
+        return (
+            bool(self.active_players)
+            and self.pending_checkout is None
+            and self.active_players[self.current_player_index]["name"] == BOT_NAME
+        )
 
     def _generate_bot_score(self, player):
         remaining = player["score"]
@@ -126,6 +131,8 @@ class dartgame:
             bot_player = self.active_players[self.current_player_index]
             score = self._generate_bot_score(bot_player)
             state = self.update_score(score)
+            if self.pending_checkout is not None:
+                state = self.confirm_checkout(3)
             if state.get("winner"):
                 return state
             if not self.is_bot_turn():
@@ -138,6 +145,7 @@ class dartgame:
         self.mode = mode
         self.active_players = []
         self.history = []
+        self.pending_checkout = None
         all_players_dict = {p[1]: p for p in self.player_db.get_all_players()}
 
         for name in selected_names:
@@ -184,19 +192,23 @@ class dartgame:
             "next_player": current_p["name"],
             "winner": None,
             "mode": self.mode,
+            "awaiting_checkout_darts": self.pending_checkout is not None,
         }
+        if self.pending_checkout is not None:
+            state["checkout_player"] = self.active_players[self.pending_checkout["player_index"]]["name"]
         if self.mode == "cricket":
             state["cricket_targets"] = ["20", "19", "18", "17", "16", "15", "bull"]
         return state
 
     def update_score(self, score_thrown_or_data):
-        if not self.active_players:
+        if not self.active_players or self.pending_checkout is not None:
             return {}
 
         import copy
         snapshot = {
             "active_players": copy.deepcopy(self.active_players),
             "current_player_index": self.current_player_index,
+            "pending_checkout": copy.deepcopy(self.pending_checkout),
         }
         self.history.append(snapshot)
 
@@ -214,29 +226,12 @@ class dartgame:
             current_p["average"] = current_p["match_score"] / current_p["darts_thrown"] * 3
             self.current_player_index = (self.current_player_index + 1) % len(self.active_players)
         elif new_score == 0:
-            current_p["legs"] += 1
-            current_p["darts"] += 3
-            current_p["total_score"] += int(score_thrown)
-            current_p["match_score"] += int(score_thrown)
-            current_p["darts_thrown"] += 3
-            current_p["average"] = current_p["match_score"] / current_p["darts_thrown"] * 3
-            self.starting_player_index = (self.starting_player_index + 1) % len(self.active_players)
-            self.current_player_index = self.starting_player_index
-            if current_p["legs"] >= self.legs_to_win:
-                self.starting_player_index = 0
-                for p in self.active_players:
-                    self.player_db.update_player(
-                        p["name"], p["darts"], p["total_score"]
-                    )
-                return {
-                    "active_players": self.active_players,
-                    "next_player": current_p["name"],
-                    "winner": current_p["name"],
-                    "mode": self.mode,
-                }
-
-            for p in self.active_players:
-                p["score"] = 501
+            current_p["score"] = 0
+            self.pending_checkout = {
+                "player_index": self.current_player_index,
+                "score": int(score_thrown),
+            }
+            return self.get_game_state()
         else:
             current_p["score"] = new_score
             current_p["darts"] += 3
@@ -245,6 +240,46 @@ class dartgame:
             current_p["darts_thrown"] += 3
             current_p["average"] = current_p["match_score"] / current_p["darts_thrown"] * 3
             self.current_player_index = (self.current_player_index + 1) % len(self.active_players)
+        return self.get_game_state()
+
+    def confirm_checkout(self, darts_used):
+        if self.pending_checkout is None:
+            raise ValueError("Es gibt keinen offenen Leg-Abschluss.")
+        if isinstance(darts_used, bool) or darts_used not in (1, 2, 3):
+            raise ValueError("Die Anzahl der Pfeile muss 1, 2 oder 3 sein.")
+
+        pending = self.pending_checkout
+        current_p = self.active_players[pending["player_index"]]
+        current_p["legs"] += 1
+        current_p["darts"] += darts_used
+        current_p["total_score"] += pending["score"]
+        current_p["match_score"] += pending["score"]
+        current_p["darts_thrown"] += darts_used
+        current_p["average"] = (
+            current_p["match_score"] / current_p["darts_thrown"] * 3
+            if current_p["darts_thrown"] > 0
+            else 0
+        )
+        self.pending_checkout = None
+
+        self.starting_player_index = (self.starting_player_index + 1) % len(self.active_players)
+        self.current_player_index = self.starting_player_index
+        if current_p["legs"] >= self.legs_to_win:
+            self.starting_player_index = 0
+            for player in self.active_players:
+                self.player_db.update_player(
+                    player["name"], player["darts"], player["total_score"]
+                )
+            return {
+                "active_players": self.active_players,
+                "next_player": current_p["name"],
+                "winner": current_p["name"],
+                "mode": self.mode,
+                "awaiting_checkout_darts": False,
+            }
+
+        for player in self.active_players:
+            player["score"] = 501
         return self.get_game_state()
 
     def _update_cricket(self, data):
@@ -316,5 +351,6 @@ class dartgame:
         last_state = self.history.pop()
         self.active_players = last_state["active_players"]
         self.current_player_index = last_state["current_player_index"]
+        self.pending_checkout = last_state["pending_checkout"]
 
         return self.get_game_state()
